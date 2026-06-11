@@ -24,7 +24,14 @@ type ServiceConfig struct {
 	APIKey           string
 	Endpoint         string
 	HostHeader       string
+	Headers          []Header
 	AllowTLSInsecure bool
+}
+
+// Header is a custom HTTP header to send with turbopuffer requests.
+type Header struct {
+	Name  string
+	Value string
 }
 
 // NewClient creates a new turbopuffer client with the given configuration.
@@ -45,6 +52,9 @@ func (cfg *ServiceConfig) NewClient() turbopuffer.Client {
 		option.WithHTTPClient(&http.Client{
 			Transport: transport,
 		}),
+	}
+	for _, header := range cfg.Headers {
+		tpufOptions = append(tpufOptions, option.WithHeader(header.Name, header.Value))
 	}
 	if cfg.HostHeader != "" {
 		tpufOptions = append(tpufOptions, option.WithHeader("Host", cfg.HostHeader))

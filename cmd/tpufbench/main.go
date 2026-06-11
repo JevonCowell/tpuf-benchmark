@@ -29,6 +29,7 @@ import (
 const (
 	envEndpoint                     = "TPUFBENCH_ENDPOINT"
 	envHostHeader                   = "TPUFBENCH_HOST_HEADER"
+	envHeaders                      = "TPUFBENCH_HEADERS"
 	envAllowTLSInsecure             = "TPUFBENCH_ALLOW_TLS_INSECURE"
 	envNamespacePrefix              = "TPUFBENCH_NAMESPACE_PREFIX"
 	envNamespaceSetupConcurrency    = "TPUFBENCH_NAMESPACE_SETUP_CONCURRENCY"
@@ -58,6 +59,8 @@ func main() {
 		"endpoint", "https://REGION.turbopuffer.com", envHelp("the turbopuffer endpoint to use", envEndpoint))
 	rootCmd.PersistentFlags().StringVar(&serviceCfg.HostHeader,
 		"host-header", "", envHelp("an optional host header to include with turbopuffer requests", envHostHeader))
+	headerSpecs := rootCmd.PersistentFlags().StringArray("header", nil,
+		envHelp("custom HTTP header to include with turbopuffer requests, repeatable as KEY=VALUE or KEY:VALUE", envHeaders))
 	rootCmd.PersistentFlags().BoolVar(&serviceCfg.AllowTLSInsecure,
 		"allow-tls-insecure", false, envHelp("allow insecure TLS connections to the turbopuffer API", envAllowTLSInsecure))
 
@@ -90,11 +93,16 @@ func main() {
 				if err := applyEnvFallbacks(runEnvFallbacks, cmd.Flags(), cmd.InheritedFlags()); err != nil {
 					return err
 				}
+				headers, err := parseHeaders(*headerSpecs)
+				if err != nil {
+					return err
+				}
+				serviceCfg.Headers = headers
 
 				rctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 				defer cancel()
 				logger := output.NewLogger(cmd.OutOrStdout())
-				err := run(rctx, serviceCfg, cfg, logger, args[0])
+				err = run(rctx, serviceCfg, cfg, logger, args[0])
 				if errors.Is(err, context.Canceled) {
 					return nil
 				}
@@ -137,6 +145,7 @@ type envFallback struct {
 var runEnvFallbacks = []envFallback{
 	{FlagName: "endpoint", EnvName: envEndpoint},
 	{FlagName: "host-header", EnvName: envHostHeader},
+	{FlagName: "header", EnvName: envHeaders},
 	{FlagName: "allow-tls-insecure", EnvName: envAllowTLSInsecure},
 	{FlagName: "namespace-prefix", EnvName: envNamespacePrefix},
 	{FlagName: "namespace-setup-concurrency", EnvName: envNamespaceSetupConcurrency},
@@ -180,6 +189,72 @@ func lookupFlag(name string, flagSets ...*pflag.FlagSet) *pflag.Flag {
 		}
 	}
 	return nil
+}
+
+// parseHeaders parses custom header flag values.
+func parseHeaders(specs []string) ([]bench.Header, error) {
+	var headers []bench.Header
+	for _, spec := range specs {
+		for _, entry := range splitHeaderSpec(spec) {
+			header, err := parseHeader(entry)
+			if err != nil {
+				return nil, err
+			}
+			headers = append(headers, header)
+		}
+	}
+	return headers, nil
+}
+
+// splitHeaderSpec splits env-style header lists into individual entries.
+func splitHeaderSpec(spec string) []string {
+	fields := strings.FieldsFunc(spec, func(r rune) bool {
+		return r == ',' || r == '\n'
+	})
+	entries := make([]string, 0, len(fields))
+	for _, field := range fields {
+		field = strings.TrimSpace(field)
+		if field != "" {
+			entries = append(entries, field)
+		}
+	}
+	return entries
+}
+
+// parseHeader parses a single custom header entry.
+func parseHeader(spec string) (bench.Header, error) {
+	separator := strings.Index(spec, "=")
+	if separator < 0 {
+		separator = strings.Index(spec, ":")
+	}
+	if separator < 0 {
+		return bench.Header{}, fmt.Errorf("invalid header %q: expected KEY=VALUE or KEY:VALUE", spec)
+	}
+	name := strings.TrimSpace(spec[:separator])
+	value := strings.TrimSpace(spec[separator+1:])
+	if name == "" {
+		return bench.Header{}, fmt.Errorf("invalid header %q: header name must not be empty", spec)
+	}
+	if !validHeaderName(name) {
+		return bench.Header{}, fmt.Errorf("invalid header %q: header name %q is not valid", spec, name)
+	}
+	return bench.Header{Name: name, Value: value}, nil
+}
+
+// validHeaderName reports whether name is a valid HTTP header field name.
+func validHeaderName(name string) bool {
+	for _, r := range name {
+		if 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' {
+			continue
+		}
+		switch r {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return name != ""
 }
 
 func run(ctx context.Context, serviceCfg bench.ServiceConfig, cfg bench.RuntimeConfig, logger *output.Logger, definitionPath string) error {
