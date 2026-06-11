@@ -42,6 +42,7 @@ Most `tpufbench run` flags can also be configured with environment variables. Ex
 | --- | --- |
 | `--endpoint` | `TPUFBENCH_ENDPOINT` |
 | `--host-header` | `TPUFBENCH_HOST_HEADER` |
+| `--header` | `TPUFBENCH_HEADERS` |
 | `--allow-tls-insecure` | `TPUFBENCH_ALLOW_TLS_INSECURE` |
 | `--namespace-prefix` | `TPUFBENCH_NAMESPACE_PREFIX` |
 | `--namespace-setup-concurrency` | `TPUFBENCH_NAMESPACE_SETUP_CONCURRENCY` |
@@ -51,6 +52,34 @@ Most `tpufbench run` flags can also be configured with environment variables. Ex
 | `--warm-cache` | `TPUFBENCH_WARM_CACHE` |
 | `--purge-cache` | `TPUFBENCH_PURGE_CACHE` |
 | `--duration` | `TPUFBENCH_DURATION` |
+
+`--header` can be repeated and accepts `KEY=VALUE` or `KEY:VALUE`. `TPUFBENCH_HEADERS` uses the same format, with multiple headers separated by commas or newlines.
+
+For example, pass custom headers directly on the CLI:
+
+```bash
+./tpufbench \
+    --header 'X-Route=canary' \
+    --header 'X-Team=benchmarks' \
+    run ./benchmarks/website/vector-10m-hot.toml
+```
+
+Or configure the same headers with an environment variable:
+
+```bash
+TPUFBENCH_HEADERS='X-Route=canary,X-Team=benchmarks' \
+    ./tpufbench run ./benchmarks/website/vector-10m-hot.toml
+```
+
+Newline-separated headers are supported for YAML environment values, such as Kubernetes manifests:
+
+```yaml
+env:
+  - name: TPUFBENCH_HEADERS
+    value: |
+      X-Route=canary
+      X-Team=benchmarks
+```
 
 `TURBOPUFFER_API_KEY` is still required for API authentication. `DATASET_CACHE_DIR` can be used to choose the local dataset cache directory.
 
