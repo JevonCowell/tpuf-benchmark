@@ -34,6 +34,7 @@ const (
 	envNamespacePrefix              = "TPUFBENCH_NAMESPACE_PREFIX"
 	envNamespaceSetupConcurrency    = "TPUFBENCH_NAMESPACE_SETUP_CONCURRENCY"
 	envNamespaceSetupConcurrencyMax = "TPUFBENCH_NAMESPACE_SETUP_CONCURRENCY_MAX"
+	envExistingNamespaces           = "TPUFBENCH_EXISTING_NAMESPACES"
 	envIfNonempty                   = "TPUFBENCH_IF_NONEMPTY"
 	envOutputDir                    = "TPUFBENCH_OUTPUT_DIR"
 	envWarmCache                    = "TPUFBENCH_WARM_CACHE"
@@ -71,6 +72,8 @@ func main() {
 			envHelp("the maximum number of concurrent requests per namespace when upserting documents to setup a namespace", envNamespaceSetupConcurrency))
 		flags.IntVar(&cfg.NamespaceSetupConcurrencyMax, "namespace-setup-concurrency-max", 64,
 			envHelp("maximum number of concurrent requests when upserting documetnts to setup namespaces (across all namespaces)", envNamespaceSetupConcurrencyMax))
+		flags.StringArrayVar(&cfg.ExistingNamespaces, "existing-namespaces", nil,
+			envHelp("existing namespace names to benchmark, separated by commas or newlines; skips initial setup/seeding", envExistingNamespaces))
 		flags.StringVar(&cfg.IfNonempty, "if-nonempty", "abort",
 			envHelp("behavior when namespaces already contain data: 'clear' to delete existing data, 'skip-upsert' to use as-is, 'abort' to stop with an error", envIfNonempty))
 		flags.StringVar(&cfg.OutputDir, "output-dir", "",
@@ -98,6 +101,14 @@ func main() {
 					return err
 				}
 				serviceCfg.Headers = headers
+				existingNamespaces, err := parseListValues(cfg.ExistingNamespaces)
+				if err != nil {
+					return fmt.Errorf("parsing --existing-namespaces: %w", err)
+				}
+				if existingNamespacesProvided(cmd.Flags(), cmd.InheritedFlags()) && len(existingNamespaces) == 0 {
+					return errors.New("--existing-namespaces was provided but no namespace names were found")
+				}
+				cfg.ExistingNamespaces = existingNamespaces
 
 				rctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 				defer cancel()
@@ -150,6 +161,7 @@ var runEnvFallbacks = []envFallback{
 	{FlagName: "namespace-prefix", EnvName: envNamespacePrefix},
 	{FlagName: "namespace-setup-concurrency", EnvName: envNamespaceSetupConcurrency},
 	{FlagName: "namespace-setup-concurrency-max", EnvName: envNamespaceSetupConcurrencyMax},
+	{FlagName: "existing-namespaces", EnvName: envExistingNamespaces},
 	{FlagName: "if-nonempty", EnvName: envIfNonempty},
 	{FlagName: "output-dir", EnvName: envOutputDir},
 	{FlagName: "warm-cache", EnvName: envWarmCache},
@@ -189,6 +201,38 @@ func lookupFlag(name string, flagSets ...*pflag.FlagSet) *pflag.Flag {
 		}
 	}
 	return nil
+}
+
+// existingNamespacesProvided reports whether existing namespace mode was requested.
+func existingNamespacesProvided(flagSets ...*pflag.FlagSet) bool {
+	if flag := lookupFlag("existing-namespaces", flagSets...); flag != nil && flag.Changed {
+		return true
+	}
+	_, ok := os.LookupEnv(envExistingNamespaces)
+	return ok
+}
+
+// parseListValues parses comma- and newline-separated flag values.
+func parseListValues(values []string) ([]string, error) {
+	var parsed []string
+	seen := make(map[string]struct{})
+	for _, value := range values {
+		fields := strings.FieldsFunc(value, func(r rune) bool {
+			return r == ',' || r == '\n' || r == '\r'
+		})
+		for _, field := range fields {
+			field = strings.TrimSpace(field)
+			if field == "" {
+				continue
+			}
+			if _, ok := seen[field]; ok {
+				return nil, fmt.Errorf("duplicate value %q", field)
+			}
+			seen[field] = struct{}{}
+			parsed = append(parsed, field)
+		}
+	}
+	return parsed, nil
 }
 
 // parseHeaders parses custom header flag values.
@@ -299,10 +343,13 @@ func run(ctx context.Context, serviceCfg bench.ServiceConfig, cfg bench.RuntimeC
 	}
 
 	// Ensure we're able to do requests against the API before downloading
-	// datasets or initializing datasources.
+	// datasets or initializing datasources. Existing namespace mode validates
+	// connectivity with metadata and query preflight checks instead.
 	client := serviceCfg.NewClient()
-	if err := runSanity(ctx, &client, cfg.NamespacePrefix+"_sanity", logger); err != nil {
-		return fmt.Errorf("failed sanity check: %w", err)
+	if len(cfg.ExistingNamespaces) == 0 {
+		if err := runSanity(ctx, &client, cfg.NamespacePrefix+"_sanity", logger); err != nil {
+			return fmt.Errorf("failed sanity check: %w", err)
+		}
 	}
 	datasourceCfg := datasource.Config{
 		CacheDir:         cacheDir,

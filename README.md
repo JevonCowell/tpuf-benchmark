@@ -47,6 +47,7 @@ Most `tpufbench run` flags can also be configured with environment variables. Ex
 | `--namespace-prefix` | `TPUFBENCH_NAMESPACE_PREFIX` |
 | `--namespace-setup-concurrency` | `TPUFBENCH_NAMESPACE_SETUP_CONCURRENCY` |
 | `--namespace-setup-concurrency-max` | `TPUFBENCH_NAMESPACE_SETUP_CONCURRENCY_MAX` |
+| `--existing-namespaces` | `TPUFBENCH_EXISTING_NAMESPACES` |
 | `--if-nonempty` | `TPUFBENCH_IF_NONEMPTY` |
 | `--output-dir` | `TPUFBENCH_OUTPUT_DIR` |
 | `--warm-cache` | `TPUFBENCH_WARM_CACHE` |
@@ -80,6 +81,34 @@ env:
       X-Route=canary
       X-Team=benchmarks
 ```
+
+`--existing-namespaces` runs against preseeded namespaces instead of generating names from `--namespace-prefix` and running initial setup/seeding. Namespace names can be comma- or newline-separated.
+
+```bash
+./tpufbench run \
+    --existing-namespaces customer-prod-a,customer-prod-b \
+    --duration 10m \
+    ./benchmarks/website/vector-10m-hot.toml
+```
+
+The same configuration can be supplied with an environment variable:
+
+```bash
+TPUFBENCH_EXISTING_NAMESPACES=customer-prod-a,customer-prod-b \
+    ./tpufbench run ./benchmarks/website/vector-10m-hot.toml
+```
+
+Newline-separated namespaces are supported for YAML environment values:
+
+```yaml
+env:
+  - name: TPUFBENCH_EXISTING_NAMESPACES
+    value: |
+      customer-prod-a
+      customer-prod-b
+```
+
+When existing namespaces are used, `tpufbench` checks that each namespace exists, validates any schema declared in the setup upsert template against namespace metadata, and runs one preflight query per query workload before the timed benchmark starts. Use `--purge-cache` if you need to clear any cache effects from preflight before measuring a cold run. Runtime upsert workloads still run if they are defined in the benchmark TOML.
 
 `TURBOPUFFER_API_KEY` is still required for API authentication. `DATASET_CACHE_DIR` can be used to choose the local dataset cache directory.
 
