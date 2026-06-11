@@ -141,6 +141,91 @@ func TestApplyEnvFallbacksStringArrayFlag(t *testing.T) {
 	}
 }
 
+func TestExistingNamespacesProvided(t *testing.T) {
+	flags := newEnvFallbackTestFlagSet(t)
+	if existingNamespacesProvided(flags) {
+		t.Fatal("existingNamespacesProvided = true, want false")
+	}
+
+	flags = newEnvFallbackTestFlagSet(t)
+	flags.StringArray("existing-namespaces", nil, "")
+	if err := flags.Set("existing-namespaces", ""); err != nil {
+		t.Fatalf("set existing-namespaces: %v", err)
+	}
+	if !existingNamespacesProvided(flags) {
+		t.Fatal("existingNamespacesProvided = false for explicitly set flag")
+	}
+
+	t.Setenv(envExistingNamespaces, "")
+	flags = newEnvFallbackTestFlagSet(t)
+	if !existingNamespacesProvided(flags) {
+		t.Fatal("existingNamespacesProvided = false for env var")
+	}
+}
+
+func TestParseListValues(t *testing.T) {
+	tests := []struct {
+		name    string
+		values  []string
+		want    []string
+		wantErr bool
+	}{
+		{
+			name:   "empty",
+			values: nil,
+			want:   nil,
+		},
+		{
+			name:   "blank string",
+			values: []string{"   "},
+			want:   nil,
+		},
+		{
+			name:   "comma separated",
+			values: []string{"ns1,ns2,ns3"},
+			want:   []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:   "newline separated",
+			values: []string{"ns1\nns2\r\nns3"},
+			want:   []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:   "repeated values",
+			values: []string{"ns1", "ns2, ns3"},
+			want:   []string{"ns1", "ns2", "ns3"},
+		},
+		{
+			name:   "ignores empty entries",
+			values: []string{" ns1,, ,ns2 "},
+			want:   []string{"ns1", "ns2"},
+		},
+		{
+			name:    "rejects duplicates",
+			values:  []string{"ns1,ns2,ns1"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseListValues(tt.values)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseListValues: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("values = %#v, want %#v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseHeaders(t *testing.T) {
 	tests := []struct {
 		name  string

@@ -68,6 +68,7 @@ type RuntimeConfig struct {
 	NamespacePrefix              string
 	NamespaceSetupConcurrency    int
 	NamespaceSetupConcurrencyMax int
+	ExistingNamespaces           []string
 	IfNonempty                   string
 	OutputDir                    string
 	WarmCache                    bool
@@ -94,15 +95,25 @@ func Run(
 
 	logger.NextStage(output.StageSettingUpNamespaces)
 
-	// Setup namespaces.
+	// Setup or load namespaces.
 	ingestStart := time.Now()
 	namespaces, sizes, err := func() (namespaces []*Namespace, sizes []int, err error) {
 		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
+		if len(cfg.ExistingNamespaces) > 0 {
+			return loadExistingNamespaces(ctx, client, def, cfg.ExistingNamespaces, logger)
+		}
 		return setupNamespaces(ctx, client, def, cfg, logger)
 	}()
 	if err != nil {
 		return err
+	}
+	if len(cfg.ExistingNamespaces) > 0 {
+		def.Namespaces = len(namespaces)
+		def.Setup.DocumentCount = 0
+		for _, size := range sizes {
+			def.Setup.DocumentCount += size
+		}
 	}
 	ingestDuration := time.Since(ingestStart)
 
